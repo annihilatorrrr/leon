@@ -4,8 +4,6 @@
 from os import path
 from json import loads
 
-packagejsonfile = open(path.dirname(path.realpath(__file__)) + '/../../package.json', 'r', encoding = 'utf8')
-packagejson = loads(packagejsonfile.read())
-packagejsonfile.close()
-
+with open(f'{path.dirname(path.realpath(__file__))}/../../package.json', 'r', encoding = 'utf8') as packagejsonfile:
+    packagejson = loads(packagejsonfile.read())
 useragent = 'Leon-Personal-Assistant/' + packagejson['version']

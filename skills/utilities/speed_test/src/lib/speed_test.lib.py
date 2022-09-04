@@ -479,10 +479,7 @@ if HTTPSConnection:
                 try:
                     kwargs = {}
                     if hasattr(ssl, 'SSLContext'):
-                        if self._tunnel_host:
-                            kwargs['server_hostname'] = self._tunnel_host
-                        else:
-                            kwargs['server_hostname'] = self.host
+                        kwargs['server_hostname'] = self._tunnel_host or self.host
                     self.sock = self._context.wrap_socket(self.sock, **kwargs)
                 except AttributeError:
                     self.sock = ssl.wrap_socket(self.sock)
@@ -658,9 +655,7 @@ def distance(origin, destination):
          math.cos(math.radians(lat2)) * math.sin(dlon / 2) *
          math.sin(dlon / 2))
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    d = radius * c
-
-    return d
+    return radius * c
 
 
 def build_user_agent():
@@ -668,14 +663,14 @@ def build_user_agent():
 
     ua_tuple = (
         'Mozilla/5.0',
-        '(%s; U; %s; en-us)' % (platform.platform(),
-                                platform.architecture()[0]),
-        'Python/%s' % platform.python_version(),
+        f'({platform.platform()}; U; {platform.architecture()[0]}; en-us)',
+        f'Python/{platform.python_version()}',
         '(KHTML, like Gecko)',
-        'speedtest-cli/%s' % __version__
+        f'speedtest-cli/{__version__}',
     )
+
     user_agent = ' '.join(ua_tuple)
-    printer('User-Agent: %s' % user_agent, debug=True)
+    printer(f'User-Agent: {user_agent}', debug=True)
     return user_agent
 
 
@@ -691,26 +686,19 @@ def build_request(url, data=None, headers=None, bump='0', secure=False):
 
     if url[0] == ':':
         scheme = ('http', 'https')[bool(secure)]
-        schemed_url = '%s%s' % (scheme, url)
+        schemed_url = f'{scheme}{url}'
     else:
         schemed_url = url
 
-    if '?' in url:
-        delim = '&'
-    else:
-        delim = '?'
-
+    delim = '&' if '?' in url else '?'
     # WHO YOU GONNA CALL? CACHE BUSTERS!
-    final_url = '%s%sx=%s.%s' % (schemed_url, delim,
-                                 int(timeit.time.time() * 1000),
-                                 bump)
+    final_url = f'{schemed_url}{delim}x={int(timeit.time.time() * 1000)}.{bump}'
 
     headers.update({
         'Cache-Control': 'no-cache',
     })
 
-    printer('%s %s' % (('GET', 'POST')[bool(data)], final_url),
-            debug=True)
+    printer(f"{'GET', 'POST'[bool(data)]} {final_url}", debug=True)
 
     return Request(final_url, data=data, headers=headers)
 
@@ -721,15 +709,11 @@ def catch_request(request, opener=None):
 
     """
 
-    if opener:
-        _open = opener.open
-    else:
-        _open = urlopen
-
+    _open = opener.open if opener else urlopen
     try:
         uh = _open(request)
         if request.get_full_url() != uh.geturl():
-            printer('Redirected to %s' % uh.geturl(), debug=True)
+            printer(f'Redirected to {uh.geturl()}', debug=True)
         return uh, False
     except HTTP_ERRORS:
         e = get_exception()
@@ -794,15 +778,8 @@ class HTTPDownloader(threading.Thread):
         self.starttime = start
         self.timeout = timeout
         self.i = i
-        if opener:
-            self._opener = opener.open
-        else:
-            self._opener = urlopen
-
-        if shutdown_event:
-            self._shutdown_event = shutdown_event
-        else:
-            self._shutdown_event = FakeShutdownEvent()
+        self._opener = opener.open if opener else urlopen
+        self._shutdown_event = shutdown_event or FakeShutdownEvent()
 
     def run(self):
         try:
@@ -831,11 +808,7 @@ class HTTPUploaderData(object):
         self.start = start
         self.timeout = timeout
 
-        if shutdown_event:
-            self._shutdown_event = shutdown_event
-        else:
-            self._shutdown_event = FakeShutdownEvent()
-
+        self._shutdown_event = shutdown_event or FakeShutdownEvent()
         self._data = None
 
         self.total = [0]
@@ -846,10 +819,9 @@ class HTTPUploaderData(object):
         IO = BytesIO or StringIO
         try:
             self._data = IO(
-                ('content1=%s' %
-                 (chars * multiplier)[0:int(self.length) - 9]
-                 ).encode()
+                f'content1={(chars * multiplier)[:int(self.length) - 9]}'.encode()
             )
+
         except MemoryError:
             raise SpeedtestCLIError(
                 'Insufficient memory to pre-allocate upload data. Please '
@@ -888,15 +860,8 @@ class HTTPUploader(threading.Thread):
         self.timeout = timeout
         self.i = i
 
-        if opener:
-            self._opener = opener.open
-        else:
-            self._opener = urlopen
-
-        if shutdown_event:
-            self._shutdown_event = shutdown_event
-        else:
-            self._shutdown_event = FakeShutdownEvent()
+        self._opener = opener.open if opener else urlopen
+        self._shutdown_event = shutdown_event or FakeShutdownEvent()
 
     def run(self):
         request = self.request
@@ -941,22 +906,15 @@ class SpeedtestResults(object):
         self.download = download
         self.upload = upload
         self.ping = ping
-        if server is None:
-            self.server = {}
-        else:
-            self.server = server
+        self.server = {} if server is None else server
         self.client = client or {}
 
         self._share = None
-        self.timestamp = '%sZ' % datetime.datetime.utcnow().isoformat()
+        self.timestamp = f'{datetime.datetime.utcnow().isoformat()}Z'
         self.bytes_received = 0
         self.bytes_sent = 0
 
-        if opener:
-            self._opener = opener
-        else:
-            self._opener = build_opener()
-
+        self._opener = opener or build_opener()
         self._secure = secure
 
     def __repr__(self):
@@ -978,24 +936,26 @@ class SpeedtestResults(object):
         # We use a list instead of a dict because the API expects parameters
         # in a certain order
         api_data = [
-            'recommendedserverid=%s' % self.server['id'],
-            'ping=%s' % ping,
+            f"recommendedserverid={self.server['id']}",
+            f'ping={ping}',
             'screenresolution=',
             'promo=',
-            'download=%s' % download,
+            f'download={download}',
             'screendpi=',
-            'upload=%s' % upload,
+            f'upload={upload}',
             'testmethod=http',
-            'hash=%s' % md5(('%s-%s-%s-%s' %
-                             (ping, upload, download, '297aae72'))
-                            .encode()).hexdigest(),
+            (
+                'hash=%s'
+                % md5(f'{ping}-{upload}-{download}-297aae72'.encode()).hexdigest()
+            ),
             'touchscreen=none',
             'startmode=pingselect',
             'accuracy=1',
-            'bytesreceived=%s' % self.bytes_received,
-            'bytessent=%s' % self.bytes_sent,
-            'serverid=%s' % self.server['id'],
+            f'bytesreceived={self.bytes_received}',
+            f'bytessent={self.bytes_sent}',
+            f"serverid={self.server['id']}",
         ]
+
 
         headers = {'Referer': 'http://c.speedtest.net/flash/speedtest.swf'}
         request = build_request('://www.speedtest.net/api/api.php',
@@ -1019,7 +979,7 @@ class SpeedtestResults(object):
             raise ShareResultsSubmitFailure('Could not submit results to '
                                             'speedtest.net')
 
-        self._share = 'http://www.speedtest.net/result/%s.png' % resultid[0]
+        self._share = f'http://www.speedtest.net/result/{resultid[0]}.png'
 
         return self._share
 
@@ -1067,10 +1027,8 @@ class SpeedtestResults(object):
 
         kwargs = {}
         if pretty:
-            kwargs.update({
-                'indent': 4,
-                'sort_keys': True
-            })
+            kwargs |= {'indent': 4, 'sort_keys': True}
+
         return json.dumps(self.dict(), **kwargs)
 
 
@@ -1087,14 +1045,10 @@ class Speedtest(object):
 
         self._secure = secure
 
-        if shutdown_event:
-            self._shutdown_event = shutdown_event
-        else:
-            self._shutdown_event = FakeShutdownEvent()
-
+        self._shutdown_event = shutdown_event or FakeShutdownEvent()
         self.get_config()
         if config is not None:
-            self.config.update(config)
+            self.config |= config
 
         self.servers = {}
         self.closest = []
@@ -1151,9 +1105,7 @@ class Speedtest(object):
                 root = ET.fromstring(configxml)
             except ET.ParseError:
                 e = get_exception()
-                raise SpeedtestConfigError(
-                    'Malformed speedtest.net configuration: %s' % e
-                )
+                raise SpeedtestConfigError(f'Malformed speedtest.net configuration: {e}')
             server_config = root.find('server-config').attrib
             download = root.find('download').attrib
             upload = root.find('upload').attrib
@@ -1165,9 +1117,7 @@ class Speedtest(object):
                 root = DOM.parseString(configxml)
             except ExpatError:
                 e = get_exception()
-                raise SpeedtestConfigError(
-                    'Malformed speedtest.net configuration: %s' % e
-                )
+                raise SpeedtestConfigError(f'Malformed speedtest.net configuration: {e}')
             server_config = get_attributes_by_tag_name(root, 'server-config')
             download = get_attributes_by_tag_name(root, 'download')
             upload = get_attributes_by_tag_name(root, 'upload')
@@ -1245,9 +1195,7 @@ class Speedtest(object):
                 try:
                     server_list[i] = int(s)
                 except ValueError:
-                    raise InvalidServerIDType(
-                        '%s is an invalid server type, must be int' % s
-                    )
+                    raise InvalidServerIDType(f'{s} is an invalid server type, must be int')
 
         urls = [
             '://www.speedtest.net/speedtest-servers-static.php',
@@ -1264,14 +1212,14 @@ class Speedtest(object):
         for url in urls:
             try:
                 request = build_request(
-                    '%s?threads=%s' % (url,
-                                       self.config['threads']['download']),
+                    f"{url}?threads={self.config['threads']['download']}",
                     headers=headers,
-                    secure=self._secure
+                    secure=self._secure,
                 )
+
                 uh, e = catch_request(request, opener=self._opener)
                 if e:
-                    errors.append('%s' % e)
+                    errors.append(f'{e}')
                     raise ServersRetrievalError()
 
                 stream = get_response_stream(uh)
@@ -1301,18 +1249,14 @@ class Speedtest(object):
                             root = ET.fromstring(serversxml)
                         except ET.ParseError:
                             e = get_exception()
-                            raise SpeedtestServersError(
-                                'Malformed speedtest.net server list: %s' % e
-                            )
+                            raise SpeedtestServersError(f'Malformed speedtest.net server list: {e}')
                         elements = etree_iter(root, 'server')
                     except AttributeError:
                         try:
                             root = DOM.parseString(serversxml)
                         except ExpatError:
                             e = get_exception()
-                            raise SpeedtestServersError(
-                                'Malformed speedtest.net server list: %s' % e
-                            )
+                            raise SpeedtestServersError(f'Malformed speedtest.net server list: {e}')
                         elements = root.getElementsByTagName('server')
                 except (SyntaxError, xml.parsers.expat.ExpatError):
                     raise ServersRetrievalError()
@@ -1362,28 +1306,20 @@ class Speedtest(object):
         urlparts = urlparse(server)
 
         name, ext = os.path.splitext(urlparts[2])
-        if ext:
-            url = os.path.dirname(server)
-        else:
-            url = server
-
+        url = os.path.dirname(server) if ext else server
         request = build_request(url)
         uh, e = catch_request(request, opener=self._opener)
         if e:
-            raise SpeedtestMiniConnectFailure('Failed to connect to %s' %
-                                              server)
-        else:
-            text = uh.read()
-            uh.close()
+            raise SpeedtestMiniConnectFailure(f'Failed to connect to {server}')
+        text = uh.read()
+        uh.close()
 
         extension = re.findall('upload_?[Ee]xtension: "([^"]+)"',
                                text.decode())
         if not extension:
             for ext in ['php', 'asp', 'aspx', 'jsp']:
                 try:
-                    f = self._opener.open(
-                        '%s/speedtest/upload.%s' % (url, ext)
-                    )
+                    f = self._opener.open(f'{url}/speedtest/upload.{ext}')
                 except Exception:
                     pass
                 else:
@@ -1397,14 +1333,17 @@ class Speedtest(object):
             raise InvalidSpeedtestMiniServer('Invalid Speedtest Mini Server: '
                                              '%s' % server)
 
-        self.servers = [{
-            'sponsor': 'Speedtest Mini',
-            'name': urlparts[1],
-            'd': 0,
-            'url': '%s/speedtest/upload.%s' % (url.rstrip('/'), extension[0]),
-            'latency': 0,
-            'id': 0
-        }]
+        self.servers = [
+            {
+                'sponsor': 'Speedtest Mini',
+                'name': urlparts[1],
+                'd': 0,
+                'url': f"{url.rstrip('/')}/speedtest/upload.{extension[0]}",
+                'latency': 0,
+                'id': 0,
+            }
+        ]
+
 
         return self.servers
 
@@ -1450,11 +1389,10 @@ class Speedtest(object):
             cum = []
             url = os.path.dirname(server['url'])
             stamp = int(timeit.time.time() * 1000)
-            latency_url = '%s/latency.txt?x=%s' % (url, stamp)
-            for i in range(0, 3):
-                this_latency_url = '%s.%s' % (latency_url, i)
-                printer('%s %s' % ('GET', this_latency_url),
-                        debug=True)
+            latency_url = f'{url}/latency.txt?x={stamp}'
+            for i in range(3):
+                this_latency_url = f'{latency_url}.{i}'
+                printer(f'GET {this_latency_url}', debug=True)
                 urlparts = urlparse(latency_url)
                 try:
                     if urlparts[0] == 'https':
@@ -1468,7 +1406,7 @@ class Speedtest(object):
                             source_address=source_address_tuple
                         )
                     headers = {'User-Agent': user_agent}
-                    path = '%s?%s' % (urlparts[2], urlparts[4])
+                    path = f'{urlparts[2]}?{urlparts[4]}'
                     start = timeit.default_timer()
                     h.request("GET", path, headers=headers)
                     r = h.getresponse()
@@ -1513,9 +1451,8 @@ class Speedtest(object):
 
         urls = []
         for size in self.config['sizes']['download']:
-            for _ in range(0, self.config['counts']['download']):
-                urls.append('%s/random%sx%s.jpg' %
-                            (os.path.dirname(self.best['url']), size, size))
+            for _ in range(self.config['counts']['download']):
+                urls.append(f"{os.path.dirname(self.best['url'])}/random{size}x{size}.jpg")
 
         request_count = len(urls)
         requests = []
@@ -1589,7 +1526,7 @@ class Speedtest(object):
         sizes = []
 
         for size in self.config['sizes']['upload']:
-            for _ in range(0, self.config['counts']['upload']):
+            for _ in range(self.config['counts']['upload']):
                 sizes.append(size)
 
         # request_count = len(sizes)
@@ -1686,7 +1623,7 @@ def ctrl_c(shutdown_event):
 def version():
     """Print the version"""
 
-    printer('speedtest-cli %s' % __version__)
+    printer(f'speedtest-cli {__version__}')
     printer('Python %s' % sys.version.replace('\n', ''))
     sys.exit(0)
 
@@ -1777,11 +1714,7 @@ def parse_args():
                         help=ARG_SUPPRESS, default=ARG_SUPPRESS)
 
     options = parser.parse_args()
-    if isinstance(options, tuple):
-        args = options[0]
-    else:
-        args = options
-    return args
+    return options[0] if isinstance(options, tuple) else options
 
 
 def validate_optional_args(args):
@@ -1812,7 +1745,7 @@ def printer(string, quiet=False, debug=False, error=False, **kwargs):
         if sys.stdout.isatty():
             out = '\033[1;30mDEBUG: %s\033[0m' % string
         else:
-            out = 'DEBUG: %s' % string
+            out = f'DEBUG: {string}'
     else:
         out = string
 
